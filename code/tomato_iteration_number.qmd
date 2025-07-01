@@ -1,0 +1,188 @@
+---
+title: "Wrangling Workflow"
+format: html
+---
+
+## Setup and Import
+
+```{r Setup}
+library(tidyverse) # for data wrangling and plotting
+library(car) # for Anova function
+library(lme4)
+library(broom) # for model residuals extraction
+library(emmeans) # for model mean extraction
+library(multcomp) # for pairwise comparison letter display
+# install.packages("multcompView")
+library(multcompView)
+library(reshape2)
+```
+
+```{r Import Data}
+yielddat <- read_csv("../data/tomato_7_14_23.csv")
+
+yielddat
+```
+```{r Summary of Raw}
+summary(yielddat)
+```
+
+```{r Initial Wrangling}
+yielddatw <- yielddat %>%
+  mutate(rep = factor(rep),
+         var = factor(variety),
+         trt = factor(trtmt)
+         ) %>%
+  dplyr::select(c(date, rep, var, plot, trt, trtname, cummnum))
+
+yielddatw
+```
+## Exploratory Charts
+
+```{r Cumulative Marketable Yield Kg}
+ggplot(yielddatw, aes(x = trt, 
+                    y = cummnum,
+                    color = var)) +
+  geom_boxplot() +
+  geom_point() +
+  theme(legend.position = "none") +
+    theme()
+```
+```{r Cumulative Marketable Fruit Number}
+ggplot(yielddatw, aes(x = trt, 
+                    y = cummnum,
+                    color = trtname)) +
+  geom_boxplot() +
+  geom_point() +
+  facet_grid(.~date) # tilde controls what axis the facets are laid out on; krate_kgha~. would transpose; nrate_kgha~krate_kgha would create a different facet for each treatment category
+  theme(legend.position = "none")
+```
+
+```{r Model Fitting}
+options(contrasts = c("contr.sum", "contr.poly"))
+yielddatw
+
+# Model fitting
+cummnum_mod <- lm(cummnum ~ rep + trt*var, # rep + is functionally the only coding difference between a CRD and a RCBD design)
+               data = yielddatw)
+cummnum_mod
+
+# Summary
+summary(cummnum_mod)
+```
+
+im here too
+```{r ANOVA}
+Anova(cummnum_mod, type=3)
+
+```
+
+```{r resid}
+cummnum_resid <- augment(cummnum_mod) %>%
+  mutate(.studresid=rstudent(cummnum_mod))
+
+cummnum_resid
+```
+```{r }
+ggplot(cummnum_resid, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  #geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+```{r }
+ggplot(cummnum_resid, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+```{r}
+ggplot(cummnum_resid, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+```
+```{r}
+ggplot(cummnum_resid, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+```
+```{r interaction means all}
+cummnum_means_all <- emmeans(cummnum_mod,
+                          ~trt:var)
+
+cummnum_means_all
+```
+```{r interaction pwc all}
+cummnum_cld_all <- cld(cummnum_means_all, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+cummnum_cld_all
+```
+```{r selected pwc}
+cummnum_cld_selected <- cummnum_cld_all %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(trt, "+", var))
+  
+
+cummnum_cld_selected
+```
+```{r final plot}
+ggplot() +
+  geom_boxplot(data = yielddatw,
+               aes(x = trt,
+                   y = cummnum,
+                   fill = var,
+                   #color = nrate_kgha,
+                   )
+               ) +
+geom_jitter(data = yielddatw,
+            aes(x = trt,
+                y = cummnum,
+                color = var),
+            alpha = 0.6) +
+  geom_label(data = cummnum_cld_selected,
+            aes(x = trtname,
+                y = emmean,
+                label = letter),
+            size = 3,
+            label.padding = unit(.1, "lines")) +
+  labs(x = "Treatment + Variety",
+       y = "Number of Fruits/Plot") +
+  scale_fill_viridis_d() +
+  scale_color_viridis_d() +
+  theme(legend.position = "none")
+  
+#ggsave("../output/rcbd_means.png",
+#       height = 4,
+#       width = 6)
+
+```
+```{r no}
+write.csv(yield_cld_selected, "../output/letters_8_3_23dfdf.csv")
+```
+
+
+df
