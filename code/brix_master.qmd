@@ -1,0 +1,1412 @@
+---
+title: "brix_master"
+format: html
+---
+# Importing and Processing
+```{r Packages}
+#install.packages("reshape2")
+#install.packages("patchwork")
+#install.packages("nflplotR")
+#library(nflplotR)
+
+library(tidyverse) # for data wrangling and plotting
+library(car) # for Anova function
+library(lme4)
+library(broom) # for model residuals extraction
+library(emmeans) # for model mean extraction
+library(multcomp) # for pairwise comparison letter display
+# install.packages("multcompView")
+library(multcompView)
+library(reshape2)
+library(patchwork)
+```
+```{r import master list}
+master_brix <- read_csv("../data/2025_brix_master.csv")
+
+master_brix
+```
+
+```{r summary}
+summary(master_brix)
+```
+```{r transform problem children to factor}
+master_brixw <- master_brix %>%
+  mutate(rep = factor(rep),
+         lem_rate = factor(lem_rate),
+         year = factor(year),
+         id = factor(year))
+
+summary(master_brixw)
+``` 
+```{r separate by crop}
+beanbrix <- master_brixw %>%
+  filter(crop == "bean") %>%
+  dplyr::select(c(farm,
+                  plot,
+                  lem_rate,
+                  year,
+                  rep,
+                  wincrop,
+                  crop,
+                  brix)) %>%
+  na.omit()
+
+summary(beanbrix)
+
+kalebrix <- master_brixw %>%
+  filter(crop == "kale") %>%
+  dplyr::select(c(farm,
+                  plot,
+                  lem_rate,
+                  year,
+                  rep,
+                  crop,
+                  brix)) %>%
+  na.omit()
+
+summary(kalebrix)
+
+
+carrotbrix <- master_brixw %>%
+  filter(crop == "carrot") %>%
+  dplyr::select(c(farm,
+                  plot,
+                  lem_rate,
+                  year,
+                  rep,
+                  crop,
+                  brix)) %>%
+  na.omit()
+
+summary(carrotbrix)
+```
+
+# EDA plots
+
+```{r bean eda boxplot}
+ggplot(beanbrix, aes(x = lem_rate, 
+                    y = brix,
+                    color = lem_rate)) +
+  geom_boxplot() +
+  #geom_point() +
+  geom_jitter() +
+  facet_grid(wincrop~farm)
+  theme(legend.position = "none")
+```
+
+
+```{r carrot eda boxplot}
+ggplot(carrotbrix, aes(x = lem_rate, 
+                    y = brix,
+                    color = lem_rate)) +
+  geom_boxplot() +
+  #geom_point() +
+  geom_jitter() +
+  facet_grid(farm~year)
+  theme(legend.position = "none")
+```
+```{r kale eda boxplot}
+ggplot(kalebrix, aes(x = lem_rate, 
+                    y = brix,
+                    color = lem_rate)) +
+  geom_boxplot() +
+  #geom_point() +
+  geom_jitter() +
+  facet_grid(farm~year)
+  theme(legend.position = "none")
+```
+
+# Running models
+
+## Bean
+
+```{r bean model}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+beanbrix
+
+# Model fitting
+beanbrix_mod <- lm(brix ~ rep + lem_rate*farm*wincrop, # rep + is functionally the only coding difference between a CRD and a RCBD design)
+               data = beanbrix)
+beanbrix_mod
+
+# Summary
+summary(beanbrix_mod)
+```
+
+```{r bean ANOVA}
+Anova(beanbrix_mod, type=3)
+```
+```{r bean residuals}
+beanbrix_resid <- augment(beanbrix_mod) %>%
+  mutate(.studresid=rstudent(beanbrix_mod))
+
+beanbrix_resid
+```
+### Conditions
+```{r bean resid independence}
+ggplot(beanbrix_resid, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+```{r bean resid homoscedasticity}
+ggplot(beanbrix_resid, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+```{r bean resid normality}
+ggplot(beanbrix_resid, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+```
+```{r bean resid shape}
+ggplot(beanbrix_resid, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+```
+### Extracting Means
+```{r bean interaction means all}
+beanbrix_means_all <- emmeans(beanbrix_mod,
+                          ~lem_rate:farm:wincrop)
+
+beanbrix_means_all
+```
+```{r interaction pairwise bean}
+beanbrix_cld <- cld(beanbrix_means_all, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+beanbrix_cld
+```
+
+```{r selected pwc}
+beanbrix_cld_selected <- beanbrix_cld %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(farm, wincrop, lem_rate))
+  
+
+beanbrix_cld_selected
+```
+
+```{r beans all final plot}
+ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = beanbrix,
+               aes(x = lem_rate, y = brix),
+               alpha = .8) +
+  geom_jitter(data = beanbrix,
+               aes(x = lem_rate, y = brix),
+              shape = 21,
+              size = 3,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = beanbrix_cld_selected,
+            aes(x = lem_rate, y = emmean, label = letter),
+            fill = "white") +
+  facet_grid(wincrop~farm)
+  labs(title = "2024 Bean Brix by LEM Treatment", 
+       x = "LEM Rate") +
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none")
+  
+#ggsave("../output/rcbd_means.png",
+#       height = 4,
+ #      width = 6)
+
+```
+## Rerun Separating by Farm
+```{r separate farms into separate models}
+beanbrix_h <- beanbrix %>%
+  filter(farm == "hort") %>%
+  mutate(trtname = paste0(wincrop, "-", lem_rate))
+
+beanbrix_h
+
+beanbrix_b <- beanbrix %>%
+  filter(farm == "bcbf")
+
+beanbrix_b
+
+beanbrix_p <- beanbrix %>%
+  filter(farm == "paul")
+
+beanbrix_p
+
+
+```
+```{r bean models separate}
+# Hort
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+beanbrix_h
+
+# Model fitting
+beanbrix_h_mod <- lm(brix ~ rep + lem_rate*wincrop,
+               data = beanbrix_h)
+beanbrix_h_mod
+
+# Summary
+summary(beanbrix_h_mod)
+
+# BCBF
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+beanbrix_b
+
+# Model fitting
+beanbrix_b_mod <- lm(brix ~ rep + lem_rate*wincrop,
+               data = beanbrix_b)
+beanbrix_b_mod
+
+# Summary
+summary(beanbrix_b_mod)
+
+# Paul
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+beanbrix_p
+
+# Model fitting
+beanbrix_p_mod <- lm(brix ~ rep + lem_rate*wincrop,
+               data = beanbrix_p)
+beanbrix_p_mod
+
+# Summary
+summary(beanbrix_p_mod)
+
+```
+```{r bean ANOVA separate}
+Anova(beanbrix_h_mod, type=3)
+
+Anova(beanbrix_b_mod, type=3)
+
+Anova(beanbrix_p_mod, type=3)
+
+
+```
+```{r bean residuals separate}
+# Hort
+beanbrix_resid_h <- augment(beanbrix_h_mod) %>%
+  mutate(.studresid=rstudent(beanbrix_h_mod))
+
+beanbrix_resid_h
+
+# BCBF
+
+beanbrix_resid_b <- augment(beanbrix_b_mod) %>%
+  mutate(.studresid=rstudent(beanbrix_b_mod))
+
+beanbrix_resid_b
+
+# Paul
+
+beanbrix_resid_p <- augment(beanbrix_p_mod) %>%
+  mutate(.studresid=rstudent(beanbrix_p_mod))
+
+beanbrix_resid_p
+```
+```{r bean resid independence sep}
+ggplot(beanbrix_resid_h, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+ggplot(beanbrix_resid_b, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+ggplot(beanbrix_resid_p, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+```{r bean resid normality sep}
+ggplot(beanbrix_resid_h, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+
+ggplot(beanbrix_resid_b, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+
+ggplot(beanbrix_resid_p, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+```
+```{r bean resid shape sep}
+ggplot(beanbrix_resid_h, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+ggplot(beanbrix_resid_b, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+ggplot(beanbrix_resid_p, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+```
+```{r bean interaction means separate}
+beanbrix_means_h <- emmeans(beanbrix_h_mod,
+                          ~lem_rate:wincrop)
+beanbrix_means_h
+
+
+beanbrix_means_b <- emmeans(beanbrix_b_mod,
+                          ~lem_rate)
+beanbrix_means_b
+
+
+beanbrix_means_p <- emmeans(beanbrix_p_mod,
+                          ~lem_rate)
+beanbrix_means_p
+```
+
+```{r interaction pairwise bean sep}
+beanbrix_cld_h <- cld(beanbrix_means_h, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+beanbrix_cld_h
+
+beanbrix_cld_b <- cld(beanbrix_means_b, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+beanbrix_cld_b
+
+beanbrix_cld_p <- cld(beanbrix_means_p, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+beanbrix_cld_p
+```
+
+```{r selected bean sep pwc}
+beanbrix_cld_selected_h <- beanbrix_cld_h %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(wincrop, "-", lem_rate))
+
+beanbrix_cld_selected_h
+
+
+beanbrix_cld_selected_b <- beanbrix_cld_b %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(lem_rate))
+  
+beanbrix_cld_selected_b
+
+
+beanbrix_cld_selected_p <- beanbrix_cld_p %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(lem_rate))
+  
+beanbrix_cld_selected_p
+```
+### hort plot bean
+```{r, fig.width=36,fig.height=12}
+hortbeanbrixgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = beanbrix_h,
+               aes(x = trtname, y = brix),
+               alpha = .8) +
+  geom_point(data = beanbrix_h,
+               aes(x = trtname, y = brix),
+              shape = 21,
+              size = 5,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = beanbrix_cld_selected_h,
+            aes(x = trtname, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024 Snap Bean Sugar Content - HORT Site", 
+       subtitle = "UGA Horticulture Research Farm, Watkinsville, GA",
+       fill = "LEM Rate (L/m^2)",
+       y = "Total Dissolved Solids (°Bx)",
+       caption = "α = 0.05",
+       x = "Previous Crop + LEM Rate")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        text = element_text(size = 50),
+        panel.grid.minor.y = element_blank(),
+        legend.key.width = rel(8))#,
+        #legend.position = "none")
+  
+ggsave("../output/hort_bean_brix.png",
+       height = 12,
+       width = 36)
+
+hortbeanbrixgraph
+```
+###bcbf bean plot
+```{r, fig.width=18,fig.height=12}
+bcbfbeanbrixgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = beanbrix_b,
+               aes(x = lem_rate, y = brix),
+               alpha = .8) +
+  geom_point(data = beanbrix_b,
+               aes(x = lem_rate, y = brix),
+              shape = 21,
+              size = 5,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = beanbrix_cld_selected_b,
+            aes(x = lem_rate, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024 Snap Bean Sugar Content - BCBF Site", 
+       subtitle = "Buffalo Creek Berry Farm, Lexington, GA",
+      # fill = "LEM Rate (L/m^2)",
+       y = "Total Dissolved Solids (°Bx)",
+       x = "LEM Rate (L/m^2)")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 50),
+        legend.position = "none")
+  
+ggsave("../output/bcbf_bean_brix.png",
+       height = 12,
+       width = 18)
+
+bcbfbeanbrixgraph
+```
+### paul bean plot
+```{r, fig.width=18,fig.height=12}
+paulbeanbrixgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = beanbrix_p,
+               aes(x = lem_rate, y = brix),
+               alpha = .8) +
+  geom_point(data = beanbrix_p,
+               aes(x = lem_rate, y = brix),
+              shape = 21,
+              size = 5,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = beanbrix_cld_selected_p,
+            aes(x = lem_rate, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024 Snap Bean Sugar Content - HOH Site", 
+       subtitle = "Hearts of Harvest Farm, Arnoldsville, GA",
+       fill = "LEM Rate (L/m^2)",
+       y = "Total Dissolved Solids (°Bx)",
+       x = "LEM Rate (L/m^2)")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 50),
+        legend.key.width = rel(8),
+        legend.position = "none")
+  
+ggsave("../output/paul_bean_brix.png",
+       height = 12,
+       width = 18)
+
+paulbeanbrixgraph
+```
+### Patchwork Plot
+```{r, fig.width=36,fig.height=24}
+
+hortbeanbrixgraph / (bcbfbeanbrixgraph + paulbeanbrixgraph)
+
+ggsave("../output/beans_brix_plot_final.png",
+       height = 12,
+       width = 20)
+```
+```{r edit/preview bean brix graph proportions}
+
+
+ggpreview(
+  plot = ggplot2::last_plot(),
+  width = 10,
+  height = 7.5,
+  asp = NULL,
+  dpi = 300,
+  device = "png",
+  units = c("in", "cm", "mm", "px"),
+  scale = 1,
+  limitsize = FALSE,
+  bg = NULL
+)
+```
+
+
+
+# Carrot Brix
+## Separate Farms Data
+```{r separate farms into separate models c}
+carrotbrix_h <- carrotbrix %>%
+  filter(farm == "hort") %>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+carrotbrix_h
+
+carrotbrix_b <- carrotbrix %>%
+  filter(farm == "bcbf")%>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+carrotbrix_b
+
+carrotbrix_p <- carrotbrix %>%
+  filter(farm == "paul")%>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+carrotbrix_p
+
+
+```
+
+## Models and Conditions
+```{r carrot models separate}
+# Hort
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+carrotbrix_h
+
+# Model fitting
+carrotbrix_h_mod <- lm(brix ~ rep + lem_rate*year,
+               data = carrotbrix_h)
+carrotbrix_h_mod
+
+# Summary
+summary(carrotbrix_h_mod)
+
+# BCBF
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+carrotbrix_b
+
+# Model fitting
+carrotbrix_b_mod <- lm(brix ~ rep + lem_rate*year,
+               data = carrotbrix_b)
+carrotbrix_b_mod
+
+# Summary
+summary(carrotbrix_b_mod)
+
+# Paul
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+carrotbrix_p
+
+# Model fitting
+carrotbrix_p_mod <- lm(brix ~ rep + lem_rate*year,
+               data = carrotbrix_p)
+carrotbrix_p_mod
+
+# Summary
+summary(carrotbrix_p_mod)
+
+```
+```{r carrot ANOVA separate}
+Anova(carrotbrix_h_mod, type=3)
+
+Anova(carrotbrix_b_mod, type=3)
+
+Anova(carrotbrix_p_mod, type=3)
+
+
+```
+
+```{r carrot residuals separate}
+# Hort
+carrotbrix_resid_h <- augment(carrotbrix_h_mod) %>%
+  mutate(.studresid=rstudent(carrotbrix_h_mod))
+
+carrotbrix_resid_h
+
+# BCBF
+
+carrotbrix_resid_b <- augment(carrotbrix_b_mod) %>%
+  mutate(.studresid=rstudent(carrotbrix_b_mod))
+
+carrotbrix_resid_b
+
+# Paul
+
+carrotbrix_resid_p <- augment(carrotbrix_p_mod) %>%
+  mutate(.studresid=rstudent(carrotbrix_p_mod))
+
+carrotbrix_resid_p
+```
+```{r carrot resid independence sep}
+ggplot(carrotbrix_resid_h, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+ggplot(carrotbrix_resid_b, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+ggplot(carrotbrix_resid_p, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+```{r carrot resid normality sep}
+ggplot(carrotbrix_resid_h, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+
+ggplot(carrotbrix_resid_b, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+
+ggplot(carrotbrix_resid_p, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+```
+```{r carrot resid shape sep}
+ggplot(carrotbrix_resid_h, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+ggplot(carrotbrix_resid_b, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+ggplot(carrotbrix_resid_p, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+```
+```{r carrot interaction means separate}
+carrotbrix_means_h <- emmeans(carrotbrix_h_mod,
+                          ~lem_rate:year)
+carrotbrix_means_h
+
+
+carrotbrix_means_b <- emmeans(carrotbrix_b_mod,
+                          ~lem_rate:year)
+carrotbrix_means_b
+
+
+
+carrotbrix_means_p_int <- emmeans(carrotbrix_p_mod,
+                          ~lem_rate:year)
+carrotbrix_means_p_int
+
+
+
+carrotbrix_means_p <- emmeans(carrotbrix_p_mod,
+                          ~lem_rate)
+carrotbrix_means_p
+
+
+carrotbrix_means_p_year <- emmeans(carrotbrix_p_mod,
+                          ~year)
+carrotbrix_means_p_year
+```
+
+```{r interaction pairwise carrot sep}
+carrotbrix_cld_h <- cld(carrotbrix_means_h, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+carrotbrix_cld_h
+
+carrotbrix_cld_b <- cld(carrotbrix_means_b, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+carrotbrix_cld_b
+
+carrotbrix_cld_p <- cld(carrotbrix_means_p, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+carrotbrix_cld_p
+
+
+carrotbrix_cld_p_year <- cld(carrotbrix_means_p_year, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+carrotbrix_cld_p_year
+
+
+carrotbrix_cld_p_int <- cld(carrotbrix_means_p_int, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+carrotbrix_cld_p_int
+
+```
+
+```{r selected pwc}
+carrotbrix_cld_selected_h <- carrotbrix_cld_h %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+carrotbrix_cld_selected_h
+
+
+carrotbrix_cld_selected_b <- carrotbrix_cld_b %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(year, "-", lem_rate))
+  
+carrotbrix_cld_selected_b
+
+
+carrotbrix_cld_selected_p <- carrotbrix_cld_p %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(lem_rate))
+  
+carrotbrix_cld_selected_p
+
+
+carrotbrix_cld_selected_p_year <- carrotbrix_cld_p_year %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(letter = toupper(letter)) %>%
+  mutate(trtname = paste0(year))
+  
+carrotbrix_cld_selected_p_year
+
+
+
+carrotbrix_cld_selected_p_int <- carrotbrix_cld_p_int %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+  
+carrotbrix_cld_selected_p_int
+```
+## Carrot Graphs
+### Hort Carrot
+```{r, fig.width=18,fig.height=12}
+hortcarrotbrixgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = carrotbrix_h,
+               aes(x = trtname, y = brix),
+               alpha = .8) +
+  geom_point(data = carrotbrix_h,
+               aes(x = trtname, y = brix),
+              shape = 21,
+              size = 5,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = carrotbrix_cld_selected_h,
+            aes(x = trtname, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024-25 Carrot Sugar Content - HORT Site", 
+       subtitle = "UGA Horticulture Research Farm, Watkinsville, GA",
+       fill = "LEM Rate (L/m^2)",
+       y = "Total Dissolved Solids (°Bx)",
+       caption = "α = 0.05",
+       x = "Year + LEM Rate")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        text = element_text(size = 50),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none")
+  
+ggsave("../output/hort_brix_carrot.png",
+       height = 12,
+       width = 18)
+
+hortcarrotbrixgraph
+```
+### BCBF Carrot
+```{r, fig.width=18,fig.height=12}
+bcbfcarrotbrixgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = carrotbrix_b,
+               aes(x = trtname, y = brix),
+               alpha = .8) +
+  geom_point(data = carrotbrix_b,
+               aes(x = trtname, y = brix),
+              shape = 21,
+              size = 5,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = carrotbrix_cld_selected_b,
+            aes(x = trtname, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024-25 Carrot Sugar Content - BCBF Site", 
+       subtitle = "Buffalo Creek Berry Farm, Lexington, GA",
+       fill = "LEM Rate (L/m^2)",
+       y = "Total Dissolved Solids (°Bx)",
+       caption = "α = 0.05",
+       x = "Year + LEM Rate")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        text = element_text(size = 50),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none")
+  
+ggsave("../output/bcbf_brix_carrot.png",
+       height = 12,
+       width = 18)
+
+bcbfcarrotbrixgraph
+```
+### Paul Carrot
+```{r, fig.width=18,fig.height=12}
+paulcarrotbrixgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = carrotbrix_p,
+               aes(x = trtname, y = brix),
+               alpha = .8) +
+  geom_point(data = carrotbrix_p,
+               aes(x = trtname, y = brix),
+              shape = 21,
+              size = 5,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = carrotbrix_cld_selected_p_int,
+            aes(x = trtname, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024-25 Carrot Sugar Content - HOH Site", 
+       subtitle = "Hearts of Harvest Farm, Arnoldsville, GA",
+       fill = "LEM Rate (L/m^2)",
+       y = "Total Dissolved Solids (°Bx)",
+       caption = "α = 0.05",
+       x = "Year + LEM Rate")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        text = element_text(size = 50),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none")
+  
+ggsave("../output/paul_brix_carrot.png",
+       height = 12,
+       width = 18)
+
+paulcarrotbrixgraph
+```
+```{r carrots patchwork plot}
+
+hortcarrotbrixgraph / bcbfcarrotbrixgraph / paulcarrotbrixgraph
+
+ggsave("../output/carrots_brix_plot_final.png",
+       height = 30,
+       width = 12)
+```
+
+
+
+
+
+
+# Kale Brix
+## Separate By Farm
+```{r separate farms into separate models k}
+kalebrix_h <- kalebrix %>%
+  filter(farm == "hort") %>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+kalebrix_h
+
+kalebrix_b <- kalebrix %>%
+  filter(farm == "bcbf")%>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+kalebrix_b
+
+kalebrix_p <- kalebrix %>%
+  filter(farm == "paul")%>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+kalebrix_p
+
+
+```
+
+
+## Models and Conditions
+```{r kale models separate}
+# Hort
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+kalebrix_h
+
+# Model fitting
+kalebrix_h_mod <- lm(brix ~ rep + lem_rate*year,
+               data = kalebrix_h)
+kalebrix_h_mod
+
+# Summary
+summary(kalebrix_h_mod)
+
+# BCBF
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+kalebrix_b
+
+# Model fitting
+kalebrix_b_mod <- lm(brix ~ rep + lem_rate*year,
+               data = kalebrix_b)
+kalebrix_b_mod
+
+# Summary
+summary(kalebrix_b_mod)
+
+# Paul
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+kalebrix_p
+
+# Model fitting
+kalebrix_p_mod <- lm(brix ~ rep + lem_rate*year,
+               data = kalebrix_p)
+kalebrix_p_mod
+
+# Summary
+summary(kalebrix_p_mod)
+
+```
+```{r kale ANOVA separate}
+Anova(kalebrix_h_mod, type=3)
+
+Anova(kalebrix_b_mod, type=3)
+
+Anova(kalebrix_p_mod, type=3)
+
+
+```
+```{r kale residuals separate}
+# Hort
+kalebrix_resid_h <- augment(kalebrix_h_mod) %>%
+  mutate(.studresid=rstudent(kalebrix_h_mod))
+
+kalebrix_resid_h
+
+# BCBF
+
+kalebrix_resid_b <- augment(kalebrix_b_mod) %>%
+  mutate(.studresid=rstudent(kalebrix_b_mod))
+
+kalebrix_resid_b
+
+# Paul
+
+kalebrix_resid_p <- augment(kalebrix_p_mod) %>%
+  mutate(.studresid=rstudent(kalebrix_p_mod))
+
+kalebrix_resid_p
+```
+```{r kale resid independence sep}
+ggplot(kalebrix_resid_h, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+ggplot(kalebrix_resid_b, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+ggplot(kalebrix_resid_p, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+```{r kale resid normality sep}
+ggplot(kalebrix_resid_h, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+
+ggplot(kalebrix_resid_b, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+
+ggplot(kalebrix_resid_p, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+```
+```{r kale resid shape sep}
+ggplot(kalebrix_resid_h, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+ggplot(kalebrix_resid_b, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+ggplot(kalebrix_resid_p, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+```
+```{r kale interaction means separate}
+kalebrix_means_h_year <- emmeans(kalebrix_h_mod,
+                          ~year)
+kalebrix_means_h_year
+
+
+kalebrix_means_h_lem_rate <- emmeans(kalebrix_h_mod,
+                          ~lem_rate)
+kalebrix_means_h_lem_rate
+
+
+kalebrix_means_h_int <- emmeans(kalebrix_h_mod,
+                          ~lem_rate:year)
+kalebrix_means_h_int
+
+
+kalebrix_means_b <- emmeans(kalebrix_b_mod,
+                          ~lem_rate:year)
+kalebrix_means_b
+
+
+
+kalebrix_means_p <- emmeans(kalebrix_p_mod,
+                          ~lem_rate:year)
+kalebrix_means_p
+
+
+
+
+```
+```{r interaction pairwise kale sep}
+kalebrix_means_h_year <- cld(kalebrix_means_h_year, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+kalebrix_means_h_year
+
+
+kalebrix_means_h_lem_rate <- cld(kalebrix_means_h_lem_rate, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+kalebrix_means_h_lem_rate
+
+
+
+kalebrix_means_h_int <- cld(kalebrix_means_h_int, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+kalebrix_means_h_int
+
+
+
+kalebrix_cld_b <- cld(kalebrix_means_b, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+kalebrix_cld_b
+
+kalebrix_cld_p <- cld(kalebrix_means_p, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+kalebrix_cld_p
+
+```
+## kale Graphs
+
+```{r process kale labels}
+kalebrix_graph_ready <- mutate(kalebrix, farm = case_when( 
+                                farm == "hort"  ~ "HORT",
+                                farm == "bcbf"    ~ "BCBF",
+                                farm == "paul"    ~ "HOH",
+                                TRUE ~ farm))
+
+kalebrix_graph_ready
+  
+```
+
+```{r kale hort final plot}
+paulbeanbrixgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = beanbrix_p,
+               aes(x = lem_rate, y = brix),
+               alpha = .8) +
+  geom_point(data = beanbrix_p,
+               aes(x = lem_rate, y = brix),
+              shape = 21,
+              size = 3,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = beanbrix_cld_selected_p,
+            aes(x = lem_rate, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024 Snap Bean Sugar Content - HOH Site", 
+       subtitle = "Hearts of Harvest Farm, Arnoldsville, GA",
+      # fill = "LEM Rate (L/m^2)",
+       y = "Total Dissolved Solids (°Bx)",
+       caption = "α = 0.05",
+       x = "LEM Rate (L/m^2)")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 20),
+        legend.position = "none")
+  
+#ggsave("../output/rcbd_means.png",
+#       height = 4,
+ #      width = 6)
+
+paulbeanbrixgraph
+```
+
+
+```{r kales final plot}
+
+kalebrixgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = kalebrix_graph_ready,
+               aes(x = lem_rate, 
+                   y = brix),
+               alpha = .8) +
+  geom_point(data = kalebrix_graph_ready,
+               aes(x = lem_rate, 
+                   y = brix),
+              shape = 21,
+              size = 3,
+              alpha = .6) +
+  # Adding letters
+ # geom_label(data = kalebrix_cld_selected_h,
+  #          aes(x = trtname, y = emmean, label = letter),
+   #         fill = "white") +
+  facet_grid(farm~year) +
+  labs(title = "2024-25 Kale Sugar Content - All Sites", 
+       #subtitle = "UGA Horticulture Research Farm, Watkinsville, GA",
+       fill = "LEM Rate (L/m^2)",
+       y = "Total Dissolved Solids (°Bx)",
+       caption = "α = 0.05",
+       x = "Year + LEM Rate")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 20),
+        legend.position = "none")
+  
+#ggsave("../output/rcbd_means.png",
+#       height = 4,
+ #      width = 6)
+
+kalebrixgraph
+```
+
+```{r kales patchwork plot}
+
+#hortkalebrixgraph / bcbfkalebrixgraph / paulkalebrixgraph
+
+ggsave("../output/kales_brix_plot_final.png",
+       height = 12,
+       width = 18)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+womp
+

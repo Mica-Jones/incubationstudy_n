@@ -7,7 +7,7 @@ format: html
 
 
 ```{r Packages}
-install.packages("reshape2")
+#install.packages("reshape2")
 
 library(tidyverse) # for data wrangling and plotting
 library(car) # for Anova function
@@ -21,7 +21,7 @@ library(reshape2)
 ```
 
 ```{r data import}
-nitrogen_raw <- read_csv("../incubationstudy_n/data/incubation_nitrogen_processed.csv")
+nitrogen_raw <- read_csv("../data/incubation_nitrogen_processed.csv")
 
 nitrogen_raw
 ```
@@ -70,15 +70,15 @@ ggplot(nitrogen_df,aes(x = expday,
                        linetype = lem_add,
                        group = trtname
                   )) + 
-  facet_grid(site~.) +
+  facet_grid(site~lem_add) +
   geom_point() +
   geom_line() +
   theme_bw()
 
 
-ggsave("../output/no3_incubation_plot.png",
-       height = 4,
-       width = 6)
+#ggsave("../output/no3_incubation_plot.png",
+ #      height = 4,
+  #     width = 6)
 ```
 
 ```{r EDA tin boxplot}

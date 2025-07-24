@@ -1,0 +1,645 @@
+---
+title: "Incubation pH Analysis"
+format: html
+---
+
+# Importing and Processing
+```{r Packages}
+#install.packages("reshape2")
+#install.packages("patchwork")
+#install.packages("nflplotR")
+#library(nflplotR)
+
+library(tidyverse) # for data wrangling and plotting
+library(car) # for Anova function
+library(lme4)
+library(broom) # for model residuals extraction
+library(emmeans) # for model mean extraction
+library(multcomp) # for pairwise comparison letter display
+# install.packages("multcompView")
+library(multcompView)
+library(reshape2)
+library(patchwork)
+```
+-
+```{r data import}
+ph_raw <- read_csv("../data/incubation_ph.csv")
+
+ph_raw
+```
+
+```{r raw summary}
+summary(ph_raw)
+```
+
+
+```{r transform trt/rep to factor}
+ph_w <- ph_raw %>%
+  mutate(rep = factor(rep),
+         lem_field = factor(lem_field),
+         jartrt = factor(trtname))
+
+ph_w
+```
+```{r wrangled}
+summary(ph_w)
+```
+```{r EDA ph plot}
+ggplot(ph_w ,aes(x = expday,
+                       y = ph,
+                       colour = lem_field, 
+                       linetype = lem_add,
+                       group = trtname
+                  )) + 
+  facet_grid(farm~lem_add) +
+  geom_point() +
+  geom_line() +
+  theme_bw()
+
+
+#ggsave("../output/no3_incubation_plot.png",
+ #      height = 4,
+  #     width = 6)
+```
+```{r ph graph}
+ggplot(ph_w,aes(x = expday,
+                       y = ph,
+                       colour = lem_field, 
+                       linetype = lem_add,
+                       group = trtname
+                  )) + 
+  facet_grid(farm~.) +
+  geom_point() +
+  geom_line() +
+  theme_bw() +
+  scale_fill_viridis_d() +
+    theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 30),
+        legend.position = "none")
+
+
+```
+# Modeling
+```{r pH model}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+ph_w
+
+# Model fitting
+ph_mod <- lm(ph ~ rep + expday*lem_add*farm*lem_field, 
+               data = ph_w)
+ph_mod
+
+# Summary
+summary(ph_mod)
+```
+```{r pH ANOVA}
+Anova(ph_mod, type=3)
+```
+
+## Conditions
+## pH Check Assumptions
+```{r ph residuals}
+ph_resid <- augment(ph_mod) %>%
+  mutate(.studresid=rstudent(ph_mod))
+
+ph_resid
+```
+###pH Resid Independence
+
+```{r pH resid independ}
+ggplot(ph_resid, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+### pH Resid Normality 
+```{r ph qq plot}
+ggplot(ph_resid, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+```
+```{r residual bell curve}
+ggplot(ph_resid, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+```
+
+## Separate Farms
+
+```{r separate farms into separate models}
+ph_hort <- ph_w %>%
+  filter(farm == "hort") %>%
+  mutate(trtname = paste0(lem_field, "-", lem_add))
+
+ph_hort
+
+ph_bcbf <- ph_w %>%
+  filter(farm == "bcbf")%>%
+  mutate(trtname = paste0(lem_field, "-", lem_add))
+
+ph_bcbf
+
+ph_paul <- ph_w %>%
+  filter(farm == "paul")%>%
+  mutate(trtname = paste0(lem_field, "-", lem_add))
+
+ph_paul
+
+
+```
+### Hort Models
+```{r pH models hort}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+ph_hort
+
+# Model fitting
+ph_mod_hort <- lm(ph ~ rep + expday*lem_add*lem_field, 
+               data = ph_hort)
+ph_mod_hort
+
+# Summary
+summary(ph_hort)
+```
+```{r pH ANOVA hort}
+Anova(ph_mod_hort, type=3)
+```
+```{r, fig.width=35,fig.height=12}
+ggplot(ph_hort,aes(x = expday,
+                       y = ph,
+                       colour = lem_field, 
+                       linetype = lem_add
+                  )) +
+  geom_point(aes(size = 10)) +
+  geom_smooth(aes(size = 10)) +
+  theme_bw() +
+    labs(title = "LEM and Soil pH- HORT Site Soils",
+       colour = "Prior Field LEM Rate",
+       linetype = "LEM Added At Start",
+       y = "pH (1:4 soil:0.01M CaCl2)",
+       x = "Days of Incubation") +
+  scale_fill_viridis_d() +
+    theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 60),
+        legend.key.width = rel(10))
+
+ggsave("../output/hort_ph.png",
+       height = 12,
+       width = 35)
+```
+```{r separate days into separate models hort}
+ph_h3 <- ph_hort %>%
+  filter(expday == 3)
+
+ph_h3
+
+ph_h13 <- ph_hort %>%
+  filter(expday == 13)
+
+ph_h13
+
+ph_h27 <- ph_hort %>%
+  filter(expday == 27)
+
+ph_h27
+
+ph_h62 <- ph_hort %>%
+  filter(expday == 62)
+
+ph_h62
+
+ph_h90 <- ph_hort %>%
+  filter(expday == 90)
+
+ph_h90
+
+ph_h125 <- ph_hort %>%
+  filter(expday == 125)
+
+ph_h125
+```
+```{r pH models hort}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# Model fitting
+ph_mod_h3 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_h3)
+ph_mod_h13 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_h13)
+ph_mod_h27 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_h27)
+ph_mod_h62 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_h62)
+ph_mod_h90 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_h90)
+ph_mod_h125 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_h125)
+
+```
+```{r pH ANOVAs hort}
+Anova(ph_mod_h3, type=3)
+Anova(ph_mod_h13, type=3)
+Anova(ph_mod_h27, type=3)
+Anova(ph_mod_h62, type=3)
+Anova(ph_mod_h90, type=3)
+Anova(ph_mod_h125, type=3)
+
+```
+```{r ph hort interaction means separate and PWC}
+ph_means_h3 <- emmeans(ph_mod_h3,
+                          ~lem_add:lem_field)
+ph_cld_h3 <- cld(ph_means_h3, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_h3
+
+
+ph_means_h13 <- emmeans(ph_mod_h13,
+                          ~lem_add:lem_field)
+ph_cld_h13 <- cld(ph_means_h13, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_h13
+
+ph_means_h27 <- emmeans(ph_mod_h27,
+                          ~lem_add:lem_field)
+ph_cld_h27 <- cld(ph_means_h27, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_h27
+
+ph_means_h62 <- emmeans(ph_mod_h62,
+                          ~lem_add:lem_field)
+ph_cld_h62 <- cld(ph_means_h62, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_h62
+
+ph_means_h90 <- emmeans(ph_mod_h90,
+                          ~lem_add:lem_field)
+ph_cld_h90 <- cld(ph_means_h90, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_h90
+
+ph_means_h125 <- emmeans(ph_mod_h125,
+                          ~lem_add:lem_field)
+ph_cld_h125 <- cld(ph_means_h125, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_h125
+
+```
+### BCBF Models
+```{r pH models bcbf}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+ph_bcbf
+
+# Model fitting
+ph_mod_bcbf <- lm(ph ~ rep + expday*lem_add*lem_field, 
+               data = ph_bcbf)
+ph_mod_bcbf
+
+# Summary
+summary(ph_bcbf)
+```
+```{r pH ANOVA bcbf}
+Anova(ph_mod_bcbf, type=3)
+```
+```{r, fig.width=35,fig.height=12}
+ggplot(ph_bcbf,aes(x = expday,
+                       y = ph,
+                       colour = lem_field, 
+                       linetype = lem_add
+                  )) +
+  geom_point(aes(size = 10)) +
+  geom_smooth(aes(size = 10)) +
+  theme_bw() +
+    labs(title = "LEM and Soil pH- BCBF Site Soils",
+       colour = "Prior Field LEM Rate",
+       linetype = "LEM Added At Start",
+       y = "pH (1:4 soil:0.01M CaCl2)",
+       x = "Days of Incubation") +
+  scale_fill_viridis_d() +
+    theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 60),
+        legend.key.width = rel(10))
+
+ggsave("../output/bcbf_ph.png",
+       height = 12,
+       width = 35)
+```
+```{r separate days into separate models bcbf}
+ph_b3 <- ph_bcbf %>%
+  filter(expday == 3)
+
+ph_b3
+
+ph_b13 <- ph_bcbf %>%
+  filter(expday == 13)
+
+ph_b13
+
+ph_b27 <- ph_bcbf %>%
+  filter(expday == 27)
+
+ph_b27
+
+ph_b62 <- ph_bcbf %>%
+  filter(expday == 62)
+
+ph_b62
+
+ph_b90 <- ph_bcbf %>%
+  filter(expday == 90)
+
+ph_b90
+
+ph_b125 <- ph_bcbf %>%
+  filter(expday == 125)
+
+ph_b125
+```
+```{r pH models bcbf}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# Model fitting
+ph_mod_b3 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_b3)
+ph_mod_b13 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_b13)
+ph_mod_b27 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_b27)
+ph_mod_b62 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_b62)
+ph_mod_b90 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_b90)
+ph_mod_b125 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_b125)
+
+```
+```{r pH ANOVAs bcbf}
+Anova(ph_mod_b3, type=3)
+Anova(ph_mod_b13, type=3)
+Anova(ph_mod_b27, type=3)
+Anova(ph_mod_b62, type=3)
+Anova(ph_mod_b90, type=3)
+Anova(ph_mod_b125, type=3)
+
+```
+```{r ph bcbf interaction means separate and PWC}
+ph_means_b3 <- emmeans(ph_mod_b3,
+                          ~lem_add:lem_field)
+ph_cld_b3 <- cld(ph_means_b3, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_b3
+
+
+ph_means_b13 <- emmeans(ph_mod_b13,
+                          ~lem_add:lem_field)
+ph_cld_b13 <- cld(ph_means_b13, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_b13
+
+ph_means_b27 <- emmeans(ph_mod_b27,
+                          ~lem_add:lem_field)
+ph_cld_b27 <- cld(ph_means_b27, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_b27
+
+ph_means_b62 <- emmeans(ph_mod_b62,
+                          ~lem_add:lem_field)
+ph_cld_b62 <- cld(ph_means_b62, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_b62
+
+ph_means_b90 <- emmeans(ph_mod_b90,
+                          ~lem_add:lem_field)
+ph_cld_b90 <- cld(ph_means_b90, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_b90
+
+ph_means_b125 <- emmeans(ph_mod_b125,
+                          ~lem_add:lem_field)
+ph_cld_b125 <- cld(ph_means_b125, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_b125
+
+```
+
+### Paul Models
+```{r pH models paul}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+ph_paul
+
+# Model fitting
+ph_mod_paul <- lm(ph ~ rep + expday*lem_add*lem_field, 
+               data = ph_paul)
+ph_mod_paul
+
+# Summary
+summary(ph_paul)
+```
+```{r pH ANOVA paul}
+Anova(ph_mod_paul, type=3)
+```
+```{r, fig.width=35,fig.height=12}
+ggplot(ph_paul,aes(x = expday,
+                       y = ph,
+                       colour = lem_field, 
+                       linetype = lem_add
+                  )) +
+  geom_point(aes(size = 10)) +
+  geom_smooth(aes(size = 10)) +
+  theme_bw() +
+    labs(title = "LEM and Soil pH- HOH Site Soils",
+       colour = "Prior Field LEM Rate",
+       linetype = "LEM Added At Start",
+       y = "pH (1:4 soil:0.01M CaCl2)",
+       x = "Days of Incubation") +
+  scale_fill_viridis_d() +
+    theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 60),
+        legend.key.width = rel(10))
+
+ggsave("../output/paul_ph.png",
+       height = 12,
+       width = 35)
+
+```
+```{r separate days into separate models paul}
+ph_p3 <- ph_paul %>%
+  filter(expday == 3)
+
+ph_p3
+
+ph_p13 <- ph_paul %>%
+  filter(expday == 13)
+
+ph_p13
+
+ph_p27 <- ph_paul %>%
+  filter(expday == 27)
+
+ph_p27
+
+ph_p62 <- ph_paul %>%
+  filter(expday == 62)
+
+ph_p62
+
+ph_p90 <- ph_paul %>%
+  filter(expday == 90)
+
+ph_p90
+
+ph_p125 <- ph_paul %>%
+  filter(expday == 125)
+
+ph_p125
+```
+```{r pH models paul}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# Model fitting
+ph_mod_p3 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_p3)
+ph_mod_p13 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_p13)
+ph_mod_p27 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_p27)
+ph_mod_p62 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_p62)
+ph_mod_p90 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_p90)
+ph_mod_p125 <- lm(ph ~ rep + lem_add*lem_field, 
+               data = ph_p125)
+
+```
+```{r pH ANOVAs paul}
+Anova(ph_mod_p3, type=3)
+Anova(ph_mod_p13, type=3)
+Anova(ph_mod_p27, type=3)
+Anova(ph_mod_p62, type=3)
+Anova(ph_mod_p90, type=3)
+Anova(ph_mod_p125, type=3)
+
+```
+```{r ph paul interaction means separate and PWC}
+ph_means_p3 <- emmeans(ph_mod_p3,
+                          ~lem_add:lem_field)
+ph_cld_p3 <- cld(ph_means_p3, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_p3
+
+
+ph_means_p13 <- emmeans(ph_mod_p13,
+                          ~lem_add:lem_field)
+ph_cld_p13 <- cld(ph_means_p13, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_p13
+
+ph_means_p27 <- emmeans(ph_mod_p27,
+                          ~lem_add:lem_field)
+ph_cld_p27 <- cld(ph_means_p27, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_p27
+
+ph_means_p62 <- emmeans(ph_mod_p62,
+                          ~lem_add:lem_field)
+ph_cld_p62 <- cld(ph_means_p62, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_p62
+
+ph_means_p90 <- emmeans(ph_mod_p90,
+                          ~lem_add:lem_field)
+ph_cld_p90 <- cld(ph_means_p90, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_p90
+
+ph_means_p125 <- emmeans(ph_mod_p125,
+                          ~lem_add:lem_field)
+ph_cld_p125 <- cld(ph_means_p125, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+ph_cld_p125
+
+```
+
+
+
+
+womp  womp

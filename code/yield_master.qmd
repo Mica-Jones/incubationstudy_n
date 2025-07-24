@@ -1,0 +1,1337 @@
+---
+title: "yield_master"
+format: html
+---
+# Importing and Processing
+```{r Packages}
+#install.packages("reshape2")
+#install.packages("patchwork")
+#install.packages("nflplotR")
+#library(nflplotR)
+
+library(tidyverse) # for data wrangling and plotting
+library(car) # for Anova function
+library(lme4)
+library(broom) # for model residuals extraction
+library(emmeans) # for model mean extraction
+library(multcomp) # for pairwise comparison letter display
+# install.packages("multcompView")
+library(multcompView)
+library(reshape2)
+library(patchwork)
+```
+```{r import master list}
+master_yield <- read_csv("../data/24_25_yield_master.csv")
+
+master_yield
+```
+
+```{r summary}
+summary(master_yield)
+```
+```{r transform problem children to factor}
+master_yieldw <- master_yield %>%
+  mutate(rep = factor(rep),
+         lem_rate = factor(lem_rate),
+         year = factor(year),
+         id = factor(year),
+         yield = yield_kg_m2)
+
+summary(master_yieldw)
+``` 
+```{r separate by crop}
+beanyield <- master_yieldw %>%
+  filter(crop == "bean") %>%
+  dplyr::select(c(farm,
+                  lem_rate,
+                  year,
+                  rep,
+                  wincrop,
+                  crop,
+                  yield)) %>%
+  na.omit()
+
+summary(beanyield)
+
+kaleyield <- master_yieldw %>%
+  filter(crop == "kale") %>%
+  dplyr::select(c(farm,
+                  lem_rate,
+                  year,
+                  rep,
+                  crop,
+                  yield)) %>%
+  na.omit()
+
+summary(kaleyield)
+
+
+carrotyield <- master_yieldw %>%
+  filter(crop == "carrot") %>%
+  dplyr::select(c(farm,
+                  lem_rate,
+                  year,
+                  rep,
+                  crop,
+                  yield)) %>%
+  na.omit()
+
+summary(carrotyield)
+```
+
+# EDA plots
+
+```{r bean eda boxplot}
+ggplot(beanyield, aes(x = lem_rate, 
+                    y = yield,
+                    color = lem_rate)) +
+  geom_boxplot() +
+  #geom_point() +
+  geom_jitter() +
+  facet_grid(wincrop~farm)
+  theme(legend.position = "none")
+```
+
+
+```{r carrot eda boxplot}
+ggplot(carrotyield, aes(x = lem_rate, 
+                    y = yield,
+                    color = lem_rate)) +
+  geom_boxplot() +
+  #geom_point() +
+  geom_jitter() +
+  facet_grid(farm~year)
+  theme(legend.position = "none")
+```
+```{r kale eda boxplot}
+ggplot(kaleyield, aes(x = lem_rate, 
+                    y = yield,
+                    color = lem_rate)) +
+  geom_boxplot() +
+  #geom_point() +
+  geom_jitter() +
+  facet_grid(farm~year)
+  theme(legend.position = "none")
+```
+
+# Running models
+
+## Bean
+
+```{r bean model}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+beanyield
+
+# Model fitting
+beanyield_mod <- lm(yield ~ rep + lem_rate*farm*wincrop, # rep + is functionally the only coding difference between a CRD and a RCBD design)
+               data = beanyield)
+beanyield_mod
+
+# Summary
+summary(beanyield_mod)
+```
+
+```{r bean ANOVA}
+Anova(beanyield_mod, type=3)
+```
+```{r bean residuals}
+beanyield_resid <- augment(beanyield_mod) %>%
+  mutate(.studresid=rstudent(beanyield_mod))
+
+beanyield_resid
+```
+### Conditions
+```{r bean resid independence}
+ggplot(beanyield_resid, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+```{r bean resid homoscedasticity}
+ggplot(beanyield_resid, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+```{r bean resid normality}
+ggplot(beanyield_resid, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+```
+```{r bean resid shape}
+ggplot(beanyield_resid, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+```
+### Extracting Means
+```{r bean interaction means all}
+beanyield_means_all <- emmeans(beanyield_mod,
+                          ~lem_rate:farm:wincrop)
+
+beanyield_means_all
+```
+```{r interaction pairwise bean}
+beanyield_cld <- cld(beanyield_means_all, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+beanyield_cld
+```
+
+```{r selected pwc}
+beanyield_cld_selected <- beanyield_cld %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(farm, wincrop, lem_rate))
+  
+
+beanyield_cld_selected
+```
+
+```{r beans all final plot}
+ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = beanyield,
+               aes(x = lem_rate, y = yield),
+               alpha = .8) +
+  geom_jitter(data = beanyield,
+               aes(x = lem_rate, y = yield),
+              shape = 21,
+              size = 3,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = beanyield_cld_selected,
+            aes(x = lem_rate, y = emmean, label = letter),
+            fill = "white") +
+  facet_grid(wincrop~farm)
+  labs(title = "2024 Bean yield by LEM Treatment", 
+       x = "LEM Rate") +
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none")
+  
+#ggsave("../output/rcbd_means.png",
+#       height = 4,
+ #      width = 6)
+
+```
+## Rerun Separating by Farm
+```{r separate farms into separate models}
+beanyield_h <- beanyield %>%
+  filter(farm == "hort") %>%
+  mutate(trtname = paste0(wincrop, "-", lem_rate))
+
+beanyield_h
+
+beanyield_b <- beanyield %>%
+  filter(farm == "bcbf")
+
+beanyield_b
+
+beanyield_p <- beanyield %>%
+  filter(farm == "paul")
+
+beanyield_p
+
+
+```
+```{r bean models separate}
+# Hort
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+beanyield_h
+
+# Model fitting
+beanyield_h_mod <- lm(yield ~ rep + lem_rate*wincrop,
+               data = beanyield_h)
+beanyield_h_mod
+
+# Summary
+summary(beanyield_h_mod)
+
+# BCBF
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+beanyield_b
+
+# Model fitting
+beanyield_b_mod <- lm(yield ~ rep + lem_rate*wincrop,
+               data = beanyield_b)
+beanyield_b_mod
+
+# Summary
+summary(beanyield_b_mod)
+
+# Paul
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+beanyield_p
+
+# Model fitting
+beanyield_p_mod <- lm(yield ~ rep + lem_rate*wincrop,
+               data = beanyield_p)
+beanyield_p_mod
+
+# Summary
+summary(beanyield_p_mod)
+
+```
+```{r bean ANOVA separate}
+Anova(beanyield_h_mod, type=3)
+
+Anova(beanyield_b_mod, type=3)
+
+Anova(beanyield_p_mod, type=3)
+
+
+```
+```{r bean residuals separate}
+# Hort
+beanyield_resid_h <- augment(beanyield_h_mod) %>%
+  mutate(.studresid=rstudent(beanyield_h_mod))
+
+beanyield_resid_h
+
+# BCBF
+
+beanyield_resid_b <- augment(beanyield_b_mod) %>%
+  mutate(.studresid=rstudent(beanyield_b_mod))
+
+beanyield_resid_b
+
+# Paul
+
+beanyield_resid_p <- augment(beanyield_p_mod) %>%
+  mutate(.studresid=rstudent(beanyield_p_mod))
+
+beanyield_resid_p
+```
+```{r bean resid independence sep}
+ggplot(beanyield_resid_h, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+ggplot(beanyield_resid_b, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+ggplot(beanyield_resid_p, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+```{r bean resid normality sep}
+ggplot(beanyield_resid_h, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+
+ggplot(beanyield_resid_b, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+
+ggplot(beanyield_resid_p, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+```
+```{r bean resid shape sep}
+ggplot(beanyield_resid_h, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+ggplot(beanyield_resid_b, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+ggplot(beanyield_resid_p, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+```
+```{r bean interaction means separate}
+beanyield_means_h <- emmeans(beanyield_h_mod,
+                          ~lem_rate)
+beanyield_means_h
+
+
+beanyield_means_b <- emmeans(beanyield_b_mod,
+                          ~lem_rate)
+beanyield_means_b
+
+
+beanyield_means_p <- emmeans(beanyield_p_mod,
+                          ~lem_rate)
+beanyield_means_p
+```
+
+```{r interaction pairwise bean sep}
+beanyield_cld_h <- cld(beanyield_means_h, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+beanyield_cld_h
+
+beanyield_cld_b <- cld(beanyield_means_b, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+beanyield_cld_b
+
+beanyield_cld_p <- cld(beanyield_means_p, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+beanyield_cld_p
+```
+
+```{r selected bean sep pwc}
+beanyield_cld_selected_h <- beanyield_cld_h %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(lem_rate))
+
+beanyield_cld_selected_h
+
+
+beanyield_cld_selected_b <- beanyield_cld_b %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(lem_rate))
+  
+beanyield_cld_selected_b
+
+
+beanyield_cld_selected_p <- beanyield_cld_p %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(lem_rate))
+  
+beanyield_cld_selected_p
+```
+### Hort plot
+```{r, fig.width=18,fig.height=12}
+hortbeanyieldgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = beanyield_h,
+               aes(x = lem_rate, y = yield),
+               alpha = .8) +
+  geom_point(data = beanyield_h,
+               aes(x = lem_rate, y = yield),
+              shape = 21,
+              size = 5,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = beanyield_cld_selected_h,
+            aes(x = trtname, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024 Snap Bean Yield - HORT Site", 
+       subtitle = "UGA Horticulture Research Farm, Watkinsville, GA",
+       fill = "LEM Rate (L/m^2)",
+       y = "Bean Yield (kg/m^2)",
+       caption = "α = 0.05",
+       x = "LEM Rate")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        text = element_text(size = 50),
+        panel.grid.minor.y = element_blank(),
+        legend.key.width = rel(8))
+  
+ggsave("../output/hort_yield_bean.png",
+       height = 12,
+       width = 25)
+
+hortbeanyieldgraph
+```
+### BCBF Plot
+```{r, fig.width=25,fig.height=12}
+bcbfbeanyieldgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = beanyield_b,
+               aes(x = lem_rate, y = yield),
+               alpha = .8) +
+  geom_point(data = beanyield_b,
+               aes(x = lem_rate, y = yield),
+              shape = 21,
+              size = 5,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = beanyield_cld_selected_b,
+            aes(x = lem_rate, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024 Snap Bean Sugar Content - BCBF Site", 
+       subtitle = "Buffalo Creek Berry Farm, Lexington, GA",
+      # fill = "LEM Rate (L/m^2)",
+       y = "Total Dissolved Solids (°Bx)",
+       caption = "α = 0.05",
+       x = "LEM Rate (L/m^2)")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 50),
+        legend.key.width = rel(8),
+        legend.position = "none")
+  
+#ggsave("../output/rcbd_means.png",
+#       height = 4,
+ #      width = 6)
+
+bcbfbeanyieldgraph
+```
+### Paul plot
+```{r, fig.width=25,fig.height=12}
+paulbeanyieldgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = beanyield_p,
+               aes(x = lem_rate, y = yield),
+               alpha = .8) +
+  geom_point(data = beanyield_p,
+               aes(x = lem_rate, y = yield),
+              shape = 21,
+              size = 5,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = beanyield_cld_selected_p,
+            aes(x = lem_rate, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024 Snap Bean Sugar Content - HOH Site", 
+       subtitle = "Hearts of Harvest Farm, Arnoldsville, GA",
+      # fill = "LEM Rate (L/m^2)",
+       y = "Total Dissolved Solids (°Bx)",
+       caption = "α = 0.05",
+       x = "LEM Rate (L/m^2)")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 50),
+        legend.key.width = rel(8),
+        legend.position = "none")
+  
+#ggsave("../output/rcbd_means.png",
+#       height = 4,
+ #      width = 6)
+
+paulbeanyieldgraph
+```
+```{r beans patchwork plot}
+
+hortbeanyieldgraph / (bcbfbeanyieldgraph + paulbeanyieldgraph)
+
+ggsave("../output/beans_yield_plot_final.png",
+       height = 12,
+       width = 20)
+```
+```{r edit/preview bean yield graph proportions}
+
+
+ggpreview(
+  plot = ggplot2::last_plot(),
+  width = 10,
+  height = 7.5,
+  asp = NULL,
+  dpi = 300,
+  device = "png",
+  units = c("in", "cm", "mm", "px"),
+  scale = 1,
+  limitsize = FALSE,
+  bg = NULL
+)
+```
+
+
+
+# Carrot yield
+## Separate Farms Data
+```{r separate farms into separate models c}
+carrotyield_h <- carrotyield %>%
+  filter(farm == "hort") %>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+carrotyield_h
+
+carrotyield_b <- carrotyield %>%
+  filter(farm == "bcbf")%>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+carrotyield_b
+
+carrotyield_p <- carrotyield %>%
+  filter(farm == "paul")%>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+carrotyield_p
+
+
+```
+
+## Models and Conditions
+```{r carrot models separate}
+# Hort
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+carrotyield_h
+
+# Model fitting
+carrotyield_h_mod <- lm(yield ~ rep + lem_rate*year,
+               data = carrotyield_h)
+carrotyield_h_mod
+
+# Summary
+summary(carrotyield_h_mod)
+
+# BCBF
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+carrotyield_b
+
+# Model fitting
+carrotyield_b_mod <- lm(yield ~ rep + lem_rate*year,
+               data = carrotyield_b)
+carrotyield_b_mod
+
+# Summary
+summary(carrotyield_b_mod)
+
+# Paul
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+carrotyield_p
+
+# Model fitting
+carrotyield_p_mod <- lm(yield ~ rep + lem_rate*year,
+               data = carrotyield_p)
+carrotyield_p_mod
+
+# Summary
+summary(carrotyield_p_mod)
+
+```
+```{r carrot ANOVA separate}
+Anova(carrotyield_h_mod, type=3)
+
+Anova(carrotyield_b_mod, type=3)
+
+Anova(carrotyield_p_mod, type=3)
+
+
+```
+
+```{r carrot residuals separate}
+# Hort
+carrotyield_resid_h <- augment(carrotyield_h_mod) %>%
+  mutate(.studresid=rstudent(carrotyield_h_mod))
+
+carrotyield_resid_h
+
+# BCBF
+
+carrotyield_resid_b <- augment(carrotyield_b_mod) %>%
+  mutate(.studresid=rstudent(carrotyield_b_mod))
+
+carrotyield_resid_b
+
+# Paul
+
+carrotyield_resid_p <- augment(carrotyield_p_mod) %>%
+  mutate(.studresid=rstudent(carrotyield_p_mod))
+
+carrotyield_resid_p
+```
+```{r carrot resid independence sep}
+ggplot(carrotyield_resid_h, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+ggplot(carrotyield_resid_b, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+ggplot(carrotyield_resid_p, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+```{r carrot resid normality sep}
+ggplot(carrotyield_resid_h, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+
+ggplot(carrotyield_resid_b, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+
+ggplot(carrotyield_resid_p, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+```
+```{r carrot resid shape sep}
+ggplot(carrotyield_resid_h, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+ggplot(carrotyield_resid_b, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+ggplot(carrotyield_resid_p, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+```
+```{r carrot interaction means separate}
+carrotyield_means_h <- emmeans(carrotyield_h_mod,
+                          ~lem_rate:year)
+carrotyield_means_h
+
+
+carrotyield_means_b <- emmeans(carrotyield_b_mod,
+                          ~lem_rate:year)
+carrotyield_means_b
+
+
+
+carrotyield_means_p <- emmeans(carrotyield_p_mod,
+                          ~lem_rate:year)
+carrotyield_means_p
+
+
+
+```
+
+```{r interaction pairwise carrot sep}
+carrotyield_cld_h <- cld(carrotyield_means_h, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+carrotyield_cld_h
+
+carrotyield_cld_b <- cld(carrotyield_means_b, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+carrotyield_cld_b
+
+carrotyield_cld_p <- cld(carrotyield_means_p, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+carrotyield_cld_p
+
+
+```
+
+```{r selected pwc}
+carrotyield_cld_selected_h <- carrotyield_cld_h %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+carrotyield_cld_selected_h
+
+
+carrotyield_cld_selected_b <- carrotyield_cld_b %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(year, "-", lem_rate))
+  
+carrotyield_cld_selected_b
+
+
+carrotyield_cld_selected_p <- carrotyield_cld_p %>%
+  as.data.frame() %>%
+  mutate(letter = trimws(.group)) %>% 
+  mutate(trtname = paste0(year, "-", lem_rate))
+  
+carrotyield_cld_selected_p
+
+```
+## Carrot Graphs
+### Hort plot
+```{r, fig.width=25,fig.height=12}
+hortcarrotyieldgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = carrotyield_h,
+               aes(x = trtname, y = yield),
+               alpha = .8) +
+  geom_point(data = carrotyield_h,
+               aes(x = trtname, y = yield),
+              shape = 21,
+              size = 5,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = carrotyield_cld_selected_h,
+            aes(x = trtname, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024-25 Carrot Yields - HORT Site", 
+       subtitle = "UGA Horticulture Research Farm, Watkinsville, GA",
+       fill = "LEM Rate (L/m^2)",
+       y = "Root Yield (kg/m^2)",
+       caption = "α = 0.05",
+       x = "Year + LEM Rate")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        text = element_text(size = 50),
+        panel.grid.minor.y = element_blank(),
+        legend.key.width = rel(8),
+        legend.position = "none")
+  
+ggsave("../output/hort_yield_carrot.png",
+       height = 12,
+       width = 25)
+
+hortcarrotyieldgraph
+```
+###BCBF Plot
+```{r, fig.width=25,fig.height=12}
+bcbfcarrotyieldgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = carrotyield_b,
+               aes(x = trtname, y = yield),
+               alpha = .8) +
+  geom_point(data = carrotyield_b,
+               aes(x = trtname, y = yield),
+              shape = 21,
+              size = 5,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = carrotyield_cld_selected_b,
+            aes(x = trtname, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024-25 Carrot Yields - BCBF Site", 
+       subtitle = "Buffalo Creek Berry Farm, Lexington, GA",
+       fill = "LEM Rate (L/m^2)",
+       y = "Root Yield (kg/m^2)",
+       caption = "α = 0.05",
+       x = "Year + LEM Rate")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        text = element_text(size = 50),
+        panel.grid.minor.y = element_blank(),
+        legend.key.width = rel(8),
+        legend.position = "none")
+  
+ggsave("../output/bcbf_yield_carrot.png",
+       height = 12,
+       width = 25)
+
+bcbfcarrotyieldgraph
+```
+### Paul Plot
+```{r, fig.width=25,fig.height=12}
+paulcarrotyieldgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = carrotyield_p,
+               aes(x = trtname, y = yield),
+               alpha = .8) +
+  geom_point(data = carrotyield_p,
+               aes(x = trtname, y = yield),
+              shape = 21,
+              size = 5,
+              alpha = .6) +
+  # Adding letters
+  geom_label(data = carrotyield_cld_selected_p,
+            aes(x = trtname, y = emmean, label = letter),
+            fill = "white") +
+  #facet_grid(wincrop~.)
+  labs(title = "2024-25 Carrot Yields - HOH Site", 
+       subtitle = "Hearts of Harvest Farm, Arnoldsville, GA",
+       fill = "LEM Rate (L/m^2)",
+       y = "Root Yield (kg/m^2)",
+       caption = "α = 0.05",
+       x = "Year + LEM Rate")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        text = element_text(size = 50),
+        panel.grid.minor.y = element_blank(),
+        legend.key.width = rel(8),
+        legend.position = "none")
+  
+ggsave("../output/paul_yield_carrot.png",
+       height = 12,
+       width = 25)
+
+paulcarrotyieldgraph
+```
+```{r carrots patchwork plot}
+
+hortcarrotyieldgraph / bcbfcarrotyieldgraph / paulcarrotyieldgraph
+
+ggsave("../output/carrots_yield_plot_final.png",
+       height = 30,
+       width = 12)
+```
+
+
+
+
+
+
+# Kale yield
+## Separate By Farm
+```{r separate farms into separate models k}
+kaleyield_h <- kaleyield %>%
+  filter(farm == "hort") %>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+kaleyield_h
+
+kaleyield_b <- kaleyield %>%
+  filter(farm == "bcbf")%>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+kaleyield_b
+
+kaleyield_p <- kaleyield %>%
+  filter(farm == "paul")%>%
+  mutate(trtname = paste0(year, "-", lem_rate))
+
+kaleyield_p
+
+
+```
+
+
+## Models and Conditions
+```{r kale models separate}
+# Hort
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+kaleyield_h
+
+# Model fitting
+kaleyield_h_mod <- lm(yield ~ rep + lem_rate*year,
+               data = kaleyield_h)
+kaleyield_h_mod
+
+# Summary
+summary(kaleyield_h_mod)
+
+# BCBF
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+kaleyield_b
+
+# Model fitting
+kaleyield_b_mod <- lm(yield ~ rep + lem_rate*year,
+               data = kaleyield_b)
+kaleyield_b_mod
+
+# Summary
+summary(kaleyield_b_mod)
+
+# Paul
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+kaleyield_p
+
+# Model fitting
+kaleyield_p_mod <- lm(yield ~ rep + lem_rate*year,
+               data = kaleyield_p)
+kaleyield_p_mod
+
+# Summary
+summary(kaleyield_p_mod)
+
+```
+```{r kale ANOVA separate}
+Anova(kaleyield_h_mod, type=3)
+
+Anova(kaleyield_b_mod, type=3)
+
+Anova(kaleyield_p_mod, type=3)
+
+
+```
+```{r kale residuals separate}
+# Hort
+kaleyield_resid_h <- augment(kaleyield_h_mod) %>%
+  mutate(.studresid=rstudent(kaleyield_h_mod))
+
+kaleyield_resid_h
+
+# BCBF
+
+kaleyield_resid_b <- augment(kaleyield_b_mod) %>%
+  mutate(.studresid=rstudent(kaleyield_b_mod))
+
+kaleyield_resid_b
+
+# Paul
+
+kaleyield_resid_p <- augment(kaleyield_p_mod) %>%
+  mutate(.studresid=rstudent(kaleyield_p_mod))
+
+kaleyield_resid_p
+```
+```{r kale resid independence sep}
+ggplot(kaleyield_resid_h, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+ggplot(kaleyield_resid_b, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+
+ggplot(kaleyield_resid_p, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+```{r kale resid normality sep}
+ggplot(kaleyield_resid_h, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+
+ggplot(kaleyield_resid_b, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+
+ggplot(kaleyield_resid_p, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+```
+```{r kale resid shape sep}
+ggplot(kaleyield_resid_h, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+ggplot(kaleyield_resid_b, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+ggplot(kaleyield_resid_p, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+```
+```{r kale interaction means separate}
+kaleyield_means_h_year <- emmeans(kaleyield_h_mod,
+                          ~year)
+kaleyield_means_h_year
+
+
+kaleyield_means_h_lem_rate <- emmeans(kaleyield_h_mod,
+                          ~lem_rate)
+kaleyield_means_h_lem_rate
+
+
+kaleyield_means_h_int <- emmeans(kaleyield_h_mod,
+                          ~lem_rate:year)
+kaleyield_means_h_int
+
+
+kaleyield_means_b <- emmeans(kaleyield_b_mod,
+                          ~lem_rate:year)
+kaleyield_means_b
+
+
+
+kaleyield_means_p <- emmeans(kaleyield_p_mod,
+                          ~lem_rate:year)
+kaleyield_means_p
+
+
+
+
+```
+```{r interaction pairwise kale sep}
+kaleyield_means_h_year <- cld(kaleyield_means_h_year, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+kaleyield_means_h_year
+
+
+kaleyield_means_h_lem_rate <- cld(kaleyield_means_h_lem_rate, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+kaleyield_means_h_lem_rate
+
+
+
+kaleyield_means_h_int <- cld(kaleyield_means_h_int, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+kaleyield_means_h_int
+
+
+
+kaleyield_cld_b <- cld(kaleyield_means_b, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+kaleyield_cld_b
+
+kaleyield_cld_p <- cld(kaleyield_means_p, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+
+kaleyield_cld_p
+
+```
+## kale Graphs
+
+```{r process kale labels}
+kaleyield_graph_ready <- mutate(kaleyield, farm = case_when( 
+                                farm == "hort"  ~ "HORT",
+                                farm == "bcbf"    ~ "BCBF",
+                                farm == "paul"    ~ "HOH",
+                                TRUE ~ farm))
+
+kaleyield_graph_ready
+  
+```
+
+
+```{r kales final plot}
+
+kaleyieldgraph <- ggplot(mapping = aes(fill = lem_rate))+
+  # Raw data and boxplots  
+  geom_boxplot(data = kaleyield_graph_ready,
+               aes(x = lem_rate, 
+                   y = yield),
+               alpha = .8) +
+  geom_point(data = kaleyield_graph_ready,
+               aes(x = lem_rate, 
+                   y = yield),
+              shape = 21,
+              size = 3,
+              alpha = .6) +
+  # Adding letters
+ # geom_label(data = kaleyield_cld_selected_h,
+  #          aes(x = trtname, y = emmean, label = letter),
+   #         fill = "white") +
+  facet_grid(farm~year, scales = "free", space = "free") +
+  labs(title = "2024-25 Kale Sugar Content - All Sites", 
+       #subtitle = "UGA Horticulture Research Farm, Watkinsville, GA",
+       fill = "LEM Rate (L/m^2)",
+       y = "Total Dissolved Solids (°Bx)",
+       caption = "α = 0.05",
+       x = "Year + LEM Rate")+
+  scale_fill_viridis_d() +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 20),
+        legend.position = "none")
+  
+#ggsave("../output/rcbd_means.png",
+#       height = 4,
+ #      width = 6)
+
+kaleyieldgraph
+```
+
+```{r kales patchwork plot}
+
+#hortkaleyieldgraph / bcbfkaleyieldgraph / paulkaleyieldgraph
+
+ggsave("../output/kales_yield_plot_final.png",
+       height = 12,
+       width = 18)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+womp
+

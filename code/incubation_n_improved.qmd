@@ -1,0 +1,699 @@
+---
+title: "N Incubation Improved"
+format: html
+---
+
+# Importing and Processing
+```{r Packages}
+#install.packages("reshape2")
+#install.packages("patchwork")
+#install.packages("nflplotR")
+#library(nflplotR)
+
+library(tidyverse) # for data wrangling and plotting
+library(car) # for Anova function
+library(lme4)
+library(broom) # for model residuals extraction
+library(emmeans) # for model mean extraction
+library(multcomp) # for pairwise comparison letter display
+# install.packages("multcompView")
+library(multcompView)
+library(reshape2)
+library(patchwork)
+```
+
+```{r data import}
+all_nitrogen_raw <- read_csv("../data/incubation_nitrogen_processed.csv")
+
+all_nitrogen_raw
+```
+```{r transform trt/rep to factor}
+net_tin_all <- all_nitrogen_raw %>%
+  mutate(rep = factor(rep),
+         lem_field = factor(lem_field),
+         jartrt = factor(trtname),
+         farm = factor(site)) %>%
+  dplyr::select(c(date, expday, farm, lem_field, lem_add, jartrt, rep, net_tin))
+
+net_tin_all
+```
+```{r wrangled}
+summary(net_tin_all)
+```
+```{r EDA net tin plot}
+ggplot(net_tin_all ,aes(x = expday,
+                       y = net_tin,
+                       colour = lem_field, 
+                       linetype = lem_add
+                  )) + 
+  facet_grid(farm~lem_add) +
+  geom_point() +
+  geom_line() +
+  theme_bw()
+
+
+#ggsave("../output/no3_incubation_plot.png",
+ #      height = 4,
+  #     width = 6)
+```
+```{r net tin EDA graph}
+ggplot(net_tin_all, aes(x = expday,
+                       y = net_tin,
+                       colour = lem_field, 
+                       linetype = lem_add
+                  )) + 
+  facet_grid(farm~.) +
+  geom_point() +
+  geom_line() +
+  theme_bw() +
+  scale_fill_viridis_d() +
+    theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 30),
+        legend.position = "none")
+
+
+```
+# Modeling
+```{r net tin model}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+net_tin_all
+
+# Model fitting
+net_tin_mod <- lm(net_tin ~ rep + expday*lem_add*farm*lem_field, 
+               data = net_tin_all)
+net_tin_mod
+
+# Summary
+summary(net_tin_mod)
+```
+```{r tin ANOVA}
+Anova(net_tin_mod, type=3)
+```
+# Conditions
+## TIN Check Assumptions
+```{r tin residuals}
+net_tin_resid <- augment(net_tin_mod) %>%
+  mutate(.studresid=rstudent(net_tin_mod))
+
+net_tin_resid
+```
+### Net Tin Resid Independence
+
+```{r tin resid independ}
+ggplot(net_tin_resid, aes(x=.fitted, y=.studresid))+
+  geom_hline(yintercept = 0, color="red")+
+  geom_point(shape = 21,
+             fill = "purple", 
+             size = 3,
+             alpha = .7)+
+  geom_smooth()+
+  geom_hline(yintercept = c(-3,3), color = "red")+
+  theme_bw()
+```
+
+### Net TIN Resid Normality 
+```{r tin qq plot}
+ggplot(net_tin_resid, aes(sample=.studresid))+
+  stat_qq(  shape = 21,
+            fill = "purple", 
+            size = 3,
+            alpha = .7
+  )+
+  stat_qq_line()+
+  labs(x = "Theoretical quantile",
+       y = "Sample quantile")+
+  theme_bw()
+```
+```{r residual bell curve}
+ggplot(net_tin_resid, aes(x=.studresid))+
+  geom_density(color = "black",
+               fill = "purple",
+               alpha = .7)+
+  scale_x_continuous(breaks = c(-3,0,3), limits = c(-3,3))+
+  theme_bw()
+
+```
+# Separate by farm
+```{r separate farms into separate models}
+net_tin_hort <- net_tin_all %>%
+  filter(farm == "hort") %>%
+  mutate(trtname = paste0(lem_field, "-", lem_add))
+
+net_tin_hort
+
+net_tin_bcbf <- net_tin_all %>%
+  filter(farm == "bcbf")%>%
+  mutate(trtname = paste0(lem_field, "-", lem_add))
+
+net_tin_bcbf
+
+net_tin_paul <- net_tin_all %>%
+  filter(farm == "paul")%>%
+  mutate(trtname = paste0(lem_field, "-", lem_add))
+
+net_tin_paul
+
+
+```
+
+
+### Hort Models
+```{r net_tin models hort}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+net_tin_hort
+
+# Model fitting
+net_tin_mod_hort <- lm(net_tin ~ rep + expday*lem_add*lem_field, 
+               data = net_tin_hort)
+net_tin_mod_hort
+
+# Summary
+summary(net_tin_hort)
+```
+```{r net_tin ANOVA hort}
+Anova(net_tin_mod_hort, type=3)
+```
+```{r, fig.width=35,fig.height=12}
+ggplot(net_tin_hort,aes(x = expday,
+                       y = net_tin,
+                       colour = lem_field, 
+                       linetype = lem_add
+                  )) +
+  geom_point(aes(size = 10)) +
+  geom_smooth(aes(size = 10)) +
+  theme_bw() +
+    labs(title = "LEM and Net N Mineralization- HORT Site Soils",
+       colour = "Prior Field LEM Rate",
+       linetype = "LEM Added At Start",
+       y = "Net N (mg N/kg dry soil)",
+       x = "Days of Incubation") +
+  scale_fill_viridis_d() +
+    theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 60),
+        legend.key.width = rel(10))
+
+ggsave("../output/hort_tin.png",
+       height = 12,
+       width = 35)
+```
+```{r separate days into separate models hort}
+net_tin_h0 <- net_tin_hort %>%
+  filter(expday == 0)
+
+net_tin_h0
+
+net_tin_h7 <- net_tin_hort %>%
+  filter(expday == 7)
+
+net_tin_h7
+
+net_tin_h14 <- net_tin_hort %>%
+  filter(expday == 14)
+
+net_tin_h14
+
+net_tin_h28 <- net_tin_hort %>%
+  filter(expday == 28)
+
+net_tin_h28
+
+net_tin_h63 <- net_tin_hort %>%
+  filter(expday == 63)
+
+net_tin_h63
+
+net_tin_h91 <- net_tin_hort %>%
+  filter(expday == 91)
+
+net_tin_h91
+
+net_tin_h126 <- net_tin_hort %>%
+  filter(expday == 126)
+
+net_tin_h126
+```
+```{r net_tin models hort}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# Model fitting
+net_tin_mod_h0 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_h0)
+net_tin_mod_h7 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_h7)
+net_tin_mod_h14 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_h14)
+net_tin_mod_h28 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_h28)
+net_tin_mod_h63 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_h63)
+net_tin_mod_h91 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_h91)
+net_tin_mod_h126 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_h126)
+
+```
+```{r net_tin ANOVAs hort}
+#Anova(net_tin_mod_h0, type=3)
+Anova(net_tin_mod_h7, type=3)
+Anova(net_tin_mod_h14, type=3)
+Anova(net_tin_mod_h28, type=3)
+Anova(net_tin_mod_h63, type=3)
+Anova(net_tin_mod_h91, type=3)
+Anova(net_tin_mod_h126, type=3)
+
+```
+```{r net_tin hort interaction means separate and PWC}
+
+
+net_tin_means_h7 <- emmeans(net_tin_mod_h7,
+                          ~lem_add:lem_field)
+net_tin_cld_h7 <- cld(net_tin_means_h7, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_h7
+
+net_tin_means_h14 <- emmeans(net_tin_mod_h14,
+                          ~lem_add:lem_field)
+net_tin_cld_h14 <- cld(net_tin_means_h14, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_h14
+
+net_tin_means_h28 <- emmeans(net_tin_mod_h28,
+                          ~lem_add:lem_field)
+net_tin_cld_h28 <- cld(net_tin_means_h28, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_h28
+
+net_tin_means_h63 <- emmeans(net_tin_mod_h63,
+                          ~lem_add:lem_field)
+net_tin_cld_h63 <- cld(net_tin_means_h63, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_h63
+
+net_tin_means_h91 <- emmeans(net_tin_mod_h91,
+                          ~lem_add:lem_field)
+net_tin_cld_h91 <- cld(net_tin_means_h91, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_h91
+
+net_tin_means_h126 <- emmeans(net_tin_mod_h126,
+                          ~lem_add:lem_field)
+net_tin_cld_h126 <- cld(net_tin_means_h126, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_h126
+
+```
+
+
+
+### BCBF Models
+```{r net_tin models bcbf}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+net_tin_bcbf
+
+# Model fitting
+net_tin_mod_bcbf <- lm(net_tin ~ rep + expday*lem_add*lem_field, 
+               data = net_tin_bcbf)
+net_tin_mod_bcbf
+
+# Summary
+summary(net_tin_bcbf)
+```
+```{r net_tin ANOVA bcbf}
+Anova(net_tin_mod_bcbf, type=3)
+```
+```{r, fig.width=35,fig.height=12}
+ggplot(net_tin_bcbf,aes(x = expday,
+                       y = net_tin,
+                       colour = lem_field, 
+                       linetype = lem_add
+                  )) +
+  geom_point(aes(size = 10)) +
+  geom_smooth(aes(size = 10)) +
+  theme_bw() +
+    labs(title = "LEM and Net N Mineralization- BCBF Site Soils",
+       colour = "Prior Field LEM Rate",
+       linetype = "LEM Added At Start",
+       y = "Net N (mg N/kg dry soil)",
+       x = "Days of Incubation") +
+  scale_fill_viridis_d() +
+    theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 60),
+        legend.key.width = rel(10))
+
+ggsave("../output/bcbf_tin.png",
+       height = 12,
+       width = 35)
+```
+```{r separate days into separate models bcbf}
+net_tin_b0 <- net_tin_bcbf %>%
+  filter(expday == 0)
+
+net_tin_b0
+
+net_tin_b7 <- net_tin_bcbf %>%
+  filter(expday == 7)
+
+net_tin_b7
+
+net_tin_b14 <- net_tin_bcbf %>%
+  filter(expday == 14)
+
+net_tin_b14
+
+net_tin_b28 <- net_tin_bcbf %>%
+  filter(expday == 28)
+
+net_tin_b28
+
+net_tin_b63 <- net_tin_bcbf %>%
+  filter(expday == 63)
+
+net_tin_b63
+
+net_tin_b91 <- net_tin_bcbf %>%
+  filter(expday == 91)
+
+net_tin_b91
+
+net_tin_b126 <- net_tin_bcbf %>%
+  filter(expday == 126)
+
+net_tin_b126
+```
+```{r net_tin models bcbf}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# Model fitting
+net_tin_mod_b0 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_b0)
+net_tin_mod_b7 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_b7)
+net_tin_mod_b14 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_b14)
+net_tin_mod_b28 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_b28)
+net_tin_mod_b63 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_b63)
+net_tin_mod_b91 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_b91)
+net_tin_mod_b126 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_b126)
+
+```
+```{r net_tin ANOVAs bcbf}
+#Anova(net_tin_mod_b0, type=3)
+Anova(net_tin_mod_b7, type=3)
+Anova(net_tin_mod_b14, type=3)
+Anova(net_tin_mod_b28, type=3)
+Anova(net_tin_mod_b63, type=3)
+Anova(net_tin_mod_b91, type=3)
+Anova(net_tin_mod_b126, type=3)
+
+```
+```{r net_tin bcbf interaction means separate and PWC}
+
+
+net_tin_means_b7 <- emmeans(net_tin_mod_b7,
+                          ~lem_add:lem_field)
+net_tin_cld_b7 <- cld(net_tin_means_b7, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_b7
+
+net_tin_means_b14 <- emmeans(net_tin_mod_b14,
+                          ~lem_add:lem_field)
+net_tin_cld_b14 <- cld(net_tin_means_b14, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_b14
+
+net_tin_means_b28 <- emmeans(net_tin_mod_b28,
+                          ~lem_add:lem_field)
+net_tin_cld_b28 <- cld(net_tin_means_b28, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_b28
+
+net_tin_means_b63 <- emmeans(net_tin_mod_b63,
+                          ~lem_add:lem_field)
+net_tin_cld_b63 <- cld(net_tin_means_b63, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_b63
+
+net_tin_means_b91 <- emmeans(net_tin_mod_b91,
+                          ~lem_add:lem_field)
+net_tin_cld_b91 <- cld(net_tin_means_b91, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_b91
+
+net_tin_means_b126 <- emmeans(net_tin_mod_b126,
+                          ~lem_add:lem_field)
+net_tin_cld_b126 <- cld(net_tin_means_b126, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_b126
+
+```
+
+
+
+
+### Paul Models
+```{r net_tin models paul}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+net_tin_paul
+
+# Model fitting
+net_tin_mod_paul <- lm(net_tin ~ rep + expday*lem_add*lem_field, 
+               data = net_tin_paul)
+net_tin_mod_paul
+
+# Summary
+summary(net_tin_paul)
+```
+```{r net_tin ANOVA paul}
+Anova(net_tin_mod_paul, type=3)
+```
+```{r, fig.width=35,fig.height=12}
+ggplot(net_tin_paul,aes(x = expday,
+                       y = net_tin,
+                       colour = lem_field, 
+                       linetype = lem_add
+                  )) +
+  geom_point(aes(size = 10)) +
+  geom_smooth(aes(size = 10)) +
+  theme_bw() +
+    labs(title = "LEM and Net N Mineralization- HoH Site Soils",
+       colour = "Prior Field LEM Rate",
+       linetype = "LEM Added At Start",
+       y = "Net N (mg N/kg dry soil)",
+       x = "Days of Incubation") +
+  scale_fill_viridis_d() +
+    theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        text = element_text(size = 60),
+        legend.key.width = rel(10))
+
+ggsave("../output/paul_tin.png",
+       height = 12,
+       width = 35)
+```
+```{r separate days into separate models paul}
+net_tin_p0 <- net_tin_paul %>%
+  filter(expday == 0)
+
+net_tin_p0
+
+net_tin_p7 <- net_tin_paul %>%
+  filter(expday == 7)
+
+net_tin_p7
+
+net_tin_p14 <- net_tin_paul %>%
+  filter(expday == 14)
+
+net_tin_p14
+
+net_tin_p28 <- net_tin_paul %>%
+  filter(expday == 28)
+
+net_tin_p28
+
+net_tin_p63 <- net_tin_paul %>%
+  filter(expday == 63)
+
+net_tin_p63
+
+net_tin_p91 <- net_tin_paul %>%
+  filter(expday == 91)
+
+net_tin_p91
+
+net_tin_p126 <- net_tin_paul %>%
+  filter(expday == 126)
+
+net_tin_p126
+```
+```{r net_tin models paul}
+# Changing to sum-to-zero contrast
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# Model fitting
+net_tin_mod_p0 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_p0)
+net_tin_mod_p7 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_p7)
+net_tin_mod_p14 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_p14)
+net_tin_mod_p28 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_p28)
+net_tin_mod_p63 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_p63)
+net_tin_mod_p91 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_p91)
+net_tin_mod_p126 <- lm(net_tin ~ rep + lem_add*lem_field, 
+               data = net_tin_p126)
+
+```
+```{r net_tin ANOVAs paul}
+#Anova(net_tin_mod_p0, type=3)
+Anova(net_tin_mod_p7, type=3)
+Anova(net_tin_mod_p14, type=3)
+Anova(net_tin_mod_p28, type=3)
+Anova(net_tin_mod_p63, type=3)
+Anova(net_tin_mod_p91, type=3)
+Anova(net_tin_mod_p126, type=3)
+
+```
+```{r net_tin paul interaction means separate and PWC}
+
+
+net_tin_means_p7 <- emmeans(net_tin_mod_p7,
+                          ~lem_add:lem_field)
+net_tin_cld_p7 <- cld(net_tin_means_p7, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_p7
+
+net_tin_means_p14 <- emmeans(net_tin_mod_p14,
+                          ~lem_add:lem_field)
+net_tin_cld_p14 <- cld(net_tin_means_p14, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_p14
+
+net_tin_means_p28 <- emmeans(net_tin_mod_p28,
+                          ~lem_add:lem_field)
+net_tin_cld_p28 <- cld(net_tin_means_p28, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_p28
+
+net_tin_means_p63 <- emmeans(net_tin_mod_p63,
+                          ~lem_add:lem_field)
+net_tin_cld_p63 <- cld(net_tin_means_p63, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_p63
+
+net_tin_means_p91 <- emmeans(net_tin_mod_p91,
+                          ~lem_add:lem_field)
+net_tin_cld_p91 <- cld(net_tin_means_p91, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_p91
+
+net_tin_means_p126 <- emmeans(net_tin_mod_p126,
+                          ~lem_add:lem_field)
+net_tin_cld_p126 <- cld(net_tin_means_p126, 
+                   reversed=T, 
+                   adjust="none",
+               Letters=letters,
+               alpha = 0.05)
+net_tin_cld_p126
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+womp
